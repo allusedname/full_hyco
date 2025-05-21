@@ -1,11 +1,21 @@
 #!/usr/bin/env python3
 
-import logging
+import logging, os
+
+os.environ["TF_CPP_MIN_LOG_LEVEL"] = "3"
 
 import click
 
 from .datasets import list_datasets
 from .models import list_models
+
+import warnings
+warnings.filterwarnings("ignore", category=DeprecationWarning)
+
+
+import tensorflow as tf
+tf.get_logger().setLevel(logging.ERROR)
+tf.compat.v1.logging.set_verbosity(tf.compat.v1.logging.ERROR)
 
 logger = logging.getLogger(__name__)
 

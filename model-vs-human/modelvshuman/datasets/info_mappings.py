@@ -1,3 +1,4 @@
+import os
 from abc import ABC
 
 
@@ -6,7 +7,7 @@ class ImagePathToInformationMapping(ABC):
         pass
 
     def __call__(self, full_path):
-        pass
+        raise NotImplementedError()
 
 
 class ImageNetInfoMapping(ImagePathToInformationMapping):
@@ -17,27 +18,28 @@ class ImageNetInfoMapping(ImagePathToInformationMapping):
 
     def __call__(self, full_path):
         session_name = "session-1"
-        img_name = full_path.split("/")[-1]
+        img_name = os.path.basename(full_path)
         condition = "NaN"
-        category = full_path.split("/")[-2]
-
+        category = os.path.basename(os.path.dirname(full_path))
         return session_name, img_name, condition, category
 
 
 class ImageNetCInfoMapping(ImagePathToInformationMapping):
     """
         For the ImageNet-C Dataset with path structure:
-        ...{corruption function}/{corruption severity}/{category}/{img_name}
+        .../{corruption function}/{corruption severity}/{category}/{img_name}
     """
 
     def __call__(self, full_path):
         session_name = "session-1"
-        parts = full_path.split("/")
-        img_name = parts[-1]
-        category = parts[-2]
-        severity = parts[-3]
-        corruption = parts[-4]
-        condition = "{}-{}".format(corruption, severity)
+        img_name = os.path.basename(full_path)
+        level1 = os.path.dirname(full_path)          # .../{category}
+        level2 = os.path.dirname(level1)             # .../{severity}/{category}
+        level3 = os.path.dirname(level2)             # .../{corruption}/{severity}/{category}
+        category = os.path.basename(level1)
+        severity = os.path.basename(level2)
+        corruption = os.path.basename(level3)
+        condition = f"{corruption}-{severity}"
         return session_name, img_name, condition, category
 
 
@@ -48,9 +50,10 @@ class InfoMappingWithSessions(ImagePathToInformationMapping):
     """
 
     def __call__(self, full_path):
-        session_name = full_path.split("/")[-2]
-        img_name = full_path.split("/")[-1]
-        condition = img_name.split("_")[3]
-        category = img_name.split("_")[4]
-
+        session_name = os.path.basename(os.path.dirname(full_path))
+        img_name = os.path.basename(full_path)
+        parts = img_name.split("_")
+        # assuming parts[3] is condition and parts[4] is category
+        condition = parts[3] if len(parts) > 3 else ""
+        category = parts[4] if len(parts) > 4 else ""
         return session_name, img_name, condition, category

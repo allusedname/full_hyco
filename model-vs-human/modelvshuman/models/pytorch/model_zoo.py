@@ -3,7 +3,7 @@ import torch
 
 from ..registry import register_model
 from ..wrappers.pytorch import PytorchModel, PyContrastPytorchModel, ClipPytorchModel, \
-    ViTPytorchModel, EfficientNetPytorchModel, SwagPytorchModel
+    ViTPytorchModel, EfficientNetPytorchModel, SwagPytorchModel, HyCoCLIPModel
 
 _PYTORCH_IMAGE_MODELS = "rwightman/pytorch-image-models"
 
@@ -16,6 +16,18 @@ def model_pytorch(model_name, *args):
     model = torch.nn.DataParallel(model)
     return PytorchModel(model, model_name, *args)
 
+@register_model("pytorch")
+def hycoclip(model_name: str, *args):
+    """
+    Factory: builds HyCoCLIPModel with the small ViT and loads your checkpoint.
+    """
+    model = HyCoCLIPModel(
+        model_name,
+        *args,
+        arch="vit_small_patch16_224"
+    )
+
+    return model
 
 @register_model("pytorch")
 def resnet50_trained_on_SIN(model_name, *args):
