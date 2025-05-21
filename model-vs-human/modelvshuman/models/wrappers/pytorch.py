@@ -2,10 +2,14 @@ import math
 import PIL
 import clip
 import numpy as np
+import torch.nn as nn
 import torch
 from PIL.Image import Image
 from torchvision.transforms import Compose, Resize, CenterCrop, ToTensor, Normalize, ToPILImage
 from tqdm import tqdm
+
+import hycoclip.utils.distributed as dist
+import hycoclip.lorentz as L
 
 from .base import AbstractModel
 from ..pytorch.clip.imagenet_classes import imagenet_classes
@@ -220,6 +224,8 @@ from torchvision.transforms import (
 )
 
 from hycoclip.models                  import HyCoCLIP
+import torch.distributed as tdist
+import hycoclip.utils.distributed as dist 
 from hycoclip.lorentz                 import pairwise_dist
 from hycoclip.encoders.image_encoders import build_timm_vit
 from hycoclip.encoders.text_encoders  import TransformerTextEncoder
@@ -231,10 +237,7 @@ class HyCoCLIPModel(PytorchModel):
         *args,
         arch: str = "vit_small_patch16_224"
     ):
-        """
-        Wraps the official HyCoCLIP model for zero‐shot evaluation.
-        """
-        # 1) build the exact HyCoCLIP architecture (small vs base by arch)
+        # 1) build the model architecture
         visual = build_timm_vit(
             arch=arch,
             global_pool="token",
@@ -252,18 +255,18 @@ class HyCoCLIPModel(PytorchModel):
             curv_init=1.0,
             learn_curv=True,
             entail_weight=0.0,
-            use_boxes=True,
+            use_boxes = True,
             pixel_mean=(0.485, 0.456, 0.406),
             pixel_std=(0.229, 0.224, 0.225),
         )
 
-        # 2) retain checkpoint path so factory can load it
+        # 2) load the checkpoint
         checkpoint_path=r"C:\Users\xjzb2\compo_learning\model-vs-human\modelvshuman\models\hycoclip_vit_s.pth"
         ckpt = torch.load(checkpoint_path, map_location="cpu", weights_only=False)
         state = ckpt.get("model", ckpt)
         hyco.load_state_dict(state, strict=False)
 
-        # 3) delegate to base PytorchModel (handles preprocess + to_numpy)
+        # 3) Store the hyco model and hesitate parent constructor
         super().__init__(
             hyco,
             model_name,
@@ -271,19 +274,23 @@ class HyCoCLIPModel(PytorchModel):
             hyco.pixel_mean,
             hyco.pixel_std,
         )
-
-        # 4) cache zero‐shot weights [D×C]
-        self.zeroshot_weights = self._get_zeroshot_weights(
-            imagenet_classes,
-            imagenet_templates
-        )
-
-        # 5) pre‐tokenize all C class prompts for fast forward()
         dev = device()
-        all_tokens = clip.tokenize(imagenet_classes, context_length=77).to(dev)
-        # store as List[Tensor] for HyCoCLIP.forward signature
-        self.text_tokens = [all_tokens[i] for i in range(all_tokens.size(0))]
-        self.box_tokens  = self.text_tokens  # dummy, entail_weight=0
+
+        cache_file = r"C:\Users\xjzb2\compo_learning\hycoclip_zeroshot_weights.pt"
+        
+        if os.path.exists(cache_file):
+            self.zeroshot_weights = torch.load(cache_file, map_location="cpu").to(device())
+        else:
+            zs = self._get_zeroshot_weights(imagenet_classes, imagenet_templates)
+            torch.save(zs.cpu(), cache_file)
+            self.zeroshot_weights = zs.to(device())
+
+        hyco.to(dev)
+        with torch.no_grad():
+            zs = self._get_zeroshot_weights(imagenet_classes, imagenet_templates)
+            zs = zs * hyco.logit_scale.exp().to(zs.device)
+        self.zeroshot_weights = zs
+        
 
     def _get_zeroshot_weights(
         self,
@@ -314,7 +321,7 @@ class HyCoCLIPModel(PytorchModel):
             return torch.stack(ws, dim=1).to(dev)
 
     def preprocess(self):
-        """Reproduce HyCoCLIP’s training transforms (size from patch_embed)."""
+        # Doing same transformation as CLIP
         vp = self.model.visual.patch_embed
         raw = vp.img_size if hasattr(vp, "img_size") else 224
         n_px = raw[0] if isinstance(raw, (tuple, list)) else raw
@@ -327,50 +334,31 @@ class HyCoCLIPModel(PytorchModel):
         ])
 
     def forward_batch(self, images: torch.Tensor) -> np.ndarray:
-        """
-        Single‐process zero‐shot inference:
-         1) clamp hyperbolic params
-         2) encode images & texts
-         3) safe‐gather negatives
-         4) compute contrastive logits
-        """
-        self.model.eval()
+        hyco = self.model
+        hyco.eval()
         with torch.no_grad():
-            dev = device()
-
-            # undo any upstream CLIP norm & re‐apply HyCoCLIP preprocess
-            images = undo_default_preprocessing(images)
-            imgs   = [self.preprocess()(ToPILImage()(im)) for im in images]
-            batch  = torch.stack(imgs, dim=0).to(dev)   # [B×3×H×W]
-
-            hyco = self.model
-            # clamp parameters
+            # clamp scale params just like HyCoCLIP.forward
             hyco.curv.data          = torch.clamp(hyco.curv.data, **hyco._curv_minmax)
             hyco.visual_alpha.data  = torch.clamp(hyco.visual_alpha.data,  max=0.0)
             hyco.textual_alpha.data = torch.clamp(hyco.textual_alpha.data, max=0.0)
-            _curv = hyco.curv.exp()
+            curv = hyco.curv.exp()
 
-            # encode
-            img_feats = hyco.encode_image(batch, project=True)         # [B×D]
-            txt_feats = hyco.encode_text(self.text_tokens, project=True)  # [C×D]
+            # undo upstream CLIP norm → our preprocess()
+            imgs = undo_default_preprocessing(images)
+            imgs = [ self.preprocess()(ToPILImage()(im)) for im in imgs ]
+            batch = torch.stack(imgs, dim=0).to(device())
+
+            # encode & normalize
+            img_feats = hyco.encode_image(batch, project=True)
             img_feats = img_feats / img_feats.norm(dim=-1, keepdim=True)
-            txt_feats = txt_feats / txt_feats.norm(dim=-1, keepdim=True)
 
-            # gather negatives (no-op if not in dist)
-            try:
-                all_img = torch.distributed.gather_across_processes(img_feats)
-                all_txt = torch.distributed.gather_across_processes(txt_feats)
-            except Exception:
-                all_img = [img_feats]
-                all_txt = [txt_feats]
-            all_img = torch.cat(all_img, dim=0)   # [B_total×D]
-            all_txt = torch.cat(all_txt, dim=0)   # [C_total×D]
+            # score = img_feats [B×D] @ zeroshot_weights [D×C] → [B×C]
+            logits = img_feats @ self.zeroshot_weights
 
-            # contrastive logits
-            image_logits = -pairwise_dist(img_feats, all_txt, _curv)
+            # scale by logit_scale
             hyco.logit_scale.data = torch.clamp(hyco.logit_scale.data, max=4.6052)
-            logits = hyco.logit_scale.exp() * image_logits  # [B×C_total]
+            logits = hyco.logit_scale.exp() * logits
 
-            return self.to_numpy(logits)
+            return logits.detach().cpu().numpy()
         
         #python -m modelvshuman --models hycoclip --datasets cue-conflict --batch-size 64 --num-workers 16

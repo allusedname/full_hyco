@@ -9,6 +9,7 @@ from tqdm import tqdm
 from .datasets import ToTensorflow
 from .evaluation import evaluate as e
 from .utils import load_dataset, load_model
+from modelvshuman.models.wrappers.pytorch import HyCoCLIPModel
 
 logger = logging.getLogger(__name__)
 MAX_NUM_MODELS_IN_CACHE = 3
@@ -42,7 +43,10 @@ class ModelEvaluator:
 
             for images, target, paths in tqdm(dataset.loader):
                 images = images.to(device())
-                logits = model.forward_batch(images)
+                if isinstance(model, HyCoCLIPModel):
+                    logits = model.forward_batch(images)
+                else:
+                    logits = model.forward_batch(images)
                 softmax_output = model.softmax(logits)
                 if isinstance(target, torch.Tensor):
                     batch_targets = model.to_numpy(target)
