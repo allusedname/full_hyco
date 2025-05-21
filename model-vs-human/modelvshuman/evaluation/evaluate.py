@@ -36,10 +36,16 @@ def print_performance_to_csv(model_name, dataset_name,
         with open(csv_file_path, 'r') as f:
             with open(temp_file_path, 'w') as t:
                 reader = csv.reader(f)
+
+                cleaned_rows = []
+                for row in reader:
+                    if row:
+                        cleaned_rows.append(row)
+
                 writer = csv.writer(t)
 
                 has_overwritten_existing_row = False
-                for i, row in enumerate(reader):
+                for i, row in enumerate(cleaned_rows):
                     tmprow = row
                     if i >= 1:
                         assert row[0] == model_name
