@@ -18,15 +18,11 @@ def model_pytorch(model_name, *args):
 
 @register_model("pytorch")
 def hycoclip(model_name: str, *args):
-    """
-    Factory: builds HyCoCLIPModel with the small ViT and loads your checkpoint.
-    """
     model = HyCoCLIPModel(
         model_name,
         *args,
         arch="vit_small_patch16_224"
     )
-
     return model
 
 @register_model("pytorch")

@@ -213,20 +213,15 @@ class SwagPytorchModel(PytorchModel):
         return self.to_numpy(logits)    
 
 import os
-import torch
-import clip
-import numpy as np
 from tqdm import tqdm
 from typing import Sequence
 from PIL import Image
 from torchvision.transforms import (
     Compose, Resize, CenterCrop, ToTensor, Normalize, ToPILImage
 )
+from pathlib import Path
 
 from hycoclip.models                  import HyCoCLIP
-import torch.distributed as tdist
-import hycoclip.utils.distributed as dist 
-from hycoclip.lorentz                 import pairwise_dist
 from hycoclip.encoders.image_encoders import build_timm_vit
 from hycoclip.encoders.text_encoders  import TransformerTextEncoder
 
@@ -237,7 +232,6 @@ class HyCoCLIPModel(PytorchModel):
         *args,
         arch: str = "vit_small_patch16_224"
     ):
-        # 1) build the model architecture
         visual = build_timm_vit(
             arch=arch,
             global_pool="token",
@@ -260,13 +254,13 @@ class HyCoCLIPModel(PytorchModel):
             pixel_std=(0.229, 0.224, 0.225),
         )
 
-        # 2) load the checkpoint
-        checkpoint_path=r"C:\Users\xjzb2\compo_learning\model-vs-human\modelvshuman\models\hycoclip_vit_s.pth"
+        base_models_dir = Path(__file__).resolve().parent.parent
+        checkpoint_path = base_models_dir / "hycoclip_vit_s.pth"
+
         ckpt = torch.load(checkpoint_path, map_location="cpu", weights_only=False)
         state = ckpt.get("model", ckpt)
         hyco.load_state_dict(state, strict=False)
 
-        # 3) Store the hyco model and hesitate parent constructor
         super().__init__(
             hyco,
             model_name,
@@ -275,7 +269,8 @@ class HyCoCLIPModel(PytorchModel):
             hyco.pixel_std,
         )
 
-        cache_file = r"C:\Users\xjzb2\compo_learning\hycoclip_zeroshot_weights.pt"
+        project_root = Path(__file__).resolve().parents[4]
+        cache_file = project_root / "hycoclip_zeroshot_weights.pt"
         
         if os.path.exists(cache_file):
             self.zeroshot_weights = torch.load(cache_file, map_location="cpu").to(device())
@@ -284,11 +279,7 @@ class HyCoCLIPModel(PytorchModel):
             torch.save(zs.cpu(), cache_file)
             self.zeroshot_weights = zs.to(device())
 
-        hyco.to(dev)
-        with torch.no_grad():
-            zs = self._get_zeroshot_weights(imagenet_classes, imagenet_templates)
-            zs = zs * hyco.logit_scale.exp().to(zs.device)
-        self.zeroshot_weights = zs
+        hyco.to(device())
         
 
     def _get_zeroshot_weights(
@@ -309,13 +300,12 @@ class HyCoCLIPModel(PytorchModel):
                 hyco.visual_alpha.data  = torch.clamp(hyco.visual_alpha.data,  max=0.0)
                 hyco.textual_alpha.data = torch.clamp(hyco.textual_alpha.data, max=0.0)
 
-                feats = hyco.encode_text(toks, project=True)       # [T×D]
-                feats = feats / feats.norm(dim=-1, keepdim=True)   # L₂‐normalize
-                m     = feats.mean(dim=0)                          # mean‐pool → [D]
+                feats = hyco.encode_text(toks, project=True)       
+                feats = feats / feats.norm(dim=-1, keepdim=True)
+                m     = feats.mean(dim=0)
                 m     = m / m.norm()
                 ws.append(m)
 
-            # stack into [C×D], then transpose → [D×C]
             return torch.stack(ws, dim=1).to(dev)
 
     def preprocess(self):
@@ -334,18 +324,14 @@ class HyCoCLIPModel(PytorchModel):
         hyco = self.model
         hyco.eval()
         with torch.no_grad():
-            # clamp scale params just like HyCoCLIP.forward
             hyco.curv.data          = torch.clamp(hyco.curv.data, **hyco._curv_minmax)
             hyco.visual_alpha.data  = torch.clamp(hyco.visual_alpha.data,  max=0.0)
             hyco.textual_alpha.data = torch.clamp(hyco.textual_alpha.data, max=0.0)
             curv = hyco.curv.exp()
 
-            # undo upstream CLIP norm → our preprocess()
             imgs = undo_default_preprocessing(images)
             imgs = [ self.preprocess()(ToPILImage()(im)) for im in imgs ]
             batch = torch.stack(imgs, dim=0).to(device())
-
-            # encode & normalize
             img_feats = hyco.encode_image(batch, project=True)
             img_feats = img_feats / img_feats.norm(dim=-1, keepdim=True)
 
