@@ -274,7 +274,6 @@ class HyCoCLIPModel(PytorchModel):
             hyco.pixel_mean,
             hyco.pixel_std,
         )
-        dev = device()
 
         cache_file = r"C:\Users\xjzb2\compo_learning\hycoclip_zeroshot_weights.pt"
         
@@ -306,7 +305,6 @@ class HyCoCLIPModel(PytorchModel):
                 prompts = [t.format(cls) for t in templates]
                 toks    = clip.tokenize(prompts, context_length=77).to(dev)
 
-                # clamp hyperbolic params
                 hyco.curv.data          = torch.clamp(hyco.curv.data, **hyco._curv_minmax)
                 hyco.visual_alpha.data  = torch.clamp(hyco.visual_alpha.data,  max=0.0)
                 hyco.textual_alpha.data = torch.clamp(hyco.textual_alpha.data, max=0.0)
@@ -314,14 +312,13 @@ class HyCoCLIPModel(PytorchModel):
                 feats = hyco.encode_text(toks, project=True)       # [T×D]
                 feats = feats / feats.norm(dim=-1, keepdim=True)   # L₂‐normalize
                 m     = feats.mean(dim=0)                          # mean‐pool → [D]
-                m     = m / m.norm()                               # re‐normalize
+                m     = m / m.norm()
                 ws.append(m)
 
             # stack into [C×D], then transpose → [D×C]
             return torch.stack(ws, dim=1).to(dev)
 
     def preprocess(self):
-        # Doing same transformation as CLIP
         vp = self.model.visual.patch_embed
         raw = vp.img_size if hasattr(vp, "img_size") else 224
         n_px = raw[0] if isinstance(raw, (tuple, list)) else raw
@@ -354,8 +351,6 @@ class HyCoCLIPModel(PytorchModel):
 
             # score = img_feats [B×D] @ zeroshot_weights [D×C] → [B×C]
             logits = img_feats @ self.zeroshot_weights
-
-            # scale by logit_scale
             hyco.logit_scale.data = torch.clamp(hyco.logit_scale.data, max=4.6052)
             logits = hyco.logit_scale.exp() * logits
 
