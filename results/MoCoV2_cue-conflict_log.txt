@@ -1,0 +1,50 @@
+WARNING:tensorflow:From c:\users\xjzb2\compo_learning\model-vs-human\modelvshuman\models\wrappers\tensorflow.py:5: The name tf.enable_eager_execution is deprecated. Please use tf.compat.v1.enable_eager_execution instead.
+
+WARNING:tensorflow:From C:\Users\xjzb2\.conda\envs\hycoclip\lib\site-packages\tf_keras\src\losses.py:2976: The name tf.losses.sparse_softmax_cross_entropy is deprecated. Please use tf.compat.v1.losses.sparse_softmax_cross_entropy instead.
+
+Using cache found in C:\Users\xjzb2/.cache\torch\hub\kantharajucn_PyContrast_push_pretrained_models_to_pytorch_hub
+
+Pre-trained weights loaded!
+Evaluating model MoCoV2 on dataset cue-conflict using Pytorch Evaluator
+  0%|          | 0/20 [00:00<?, ?it/s]WARNING:tensorflow:From c:\users\xjzb2\compo_learning\model-vs-human\modelvshuman\models\wrappers\tensorflow.py:5: The name tf.enable_eager_execution is deprecated. Please use tf.compat.v1.enable_eager_execution instead.
+
+WARNING:tensorflow:From C:\Users\xjzb2\.conda\envs\hycoclip\lib\site-packages\tf_keras\src\losses.py:2976: The name tf.losses.sparse_softmax_cross_entropy is deprecated. Please use tf.compat.v1.losses.sparse_softmax_cross_entropy instead.
+
+WARNING:tensorflow:From c:\users\xjzb2\compo_learning\model-vs-human\modelvshuman\models\wrappers\tensorflow.py:5: The name tf.enable_eager_execution is deprecated. Please use tf.compat.v1.enable_eager_execution instead.
+
+WARNING:tensorflow:From C:\Users\xjzb2\.conda\envs\hycoclip\lib\site-packages\tf_keras\src\losses.py:2976: The name tf.losses.sparse_softmax_cross_entropy is deprecated. Please use tf.compat.v1.losses.sparse_softmax_cross_entropy instead.
+
+WARNING:tensorflow:From c:\users\xjzb2\compo_learning\model-vs-human\modelvshuman\models\wrappers\tensorflow.py:5: The name tf.enable_eager_execution is deprecated. Please use tf.compat.v1.enable_eager_execution instead.
+
+WARNING:tensorflow:From C:\Users\xjzb2\.conda\envs\hycoclip\lib\site-packages\tf_keras\src\losses.py:2976: The name tf.losses.sparse_softmax_cross_entropy is deprecated. Please use tf.compat.v1.losses.sparse_softmax_cross_entropy instead.
+
+WARNING:tensorflow:From c:\users\xjzb2\compo_learning\model-vs-human\modelvshuman\models\wrappers\tensorflow.py:5: The name tf.enable_eager_execution is deprecated. Please use tf.compat.v1.enable_eager_execution instead.
+
+WARNING:tensorflow:From C:\Users\xjzb2\.conda\envs\hycoclip\lib\site-packages\tf_keras\src\losses.py:2976: The name tf.losses.sparse_softmax_cross_entropy is deprecated. Please use tf.compat.v1.losses.sparse_softmax_cross_entropy instead.
+
+WARNING:tensorflow:From c:\users\xjzb2\compo_learning\model-vs-human\modelvshuman\models\wrappers\tensorflow.py:5: The name tf.enable_eager_execution is deprecated. Please use tf.compat.v1.enable_eager_execution instead.
+
+WARNING:tensorflow:From C:\Users\xjzb2\.conda\envs\hycoclip\lib\site-packages\tf_keras\src\losses.py:2976: The name tf.losses.sparse_softmax_cross_entropy is deprecated. Please use tf.compat.v1.losses.sparse_softmax_cross_entropy instead.
+
+WARNING:tensorflow:From c:\users\xjzb2\compo_learning\model-vs-human\modelvshuman\models\wrappers\tensorflow.py:5: The name tf.enable_eager_execution is deprecated. Please use tf.compat.v1.enable_eager_execution instead.
+
+WARNING:tensorflow:From C:\Users\xjzb2\.conda\envs\hycoclip\lib\site-packages\tf_keras\src\losses.py:2976: The name tf.losses.sparse_softmax_cross_entropy is deprecated. Please use tf.compat.v1.losses.sparse_softmax_cross_entropy instead.
+
+WARNING:tensorflow:From c:\users\xjzb2\compo_learning\model-vs-human\modelvshuman\models\wrappers\tensorflow.py:5: The name tf.enable_eager_execution is deprecated. Please use tf.compat.v1.enable_eager_execution instead.
+
+WARNING:tensorflow:From C:\Users\xjzb2\.conda\envs\hycoclip\lib\site-packages\tf_keras\src\losses.py:2976: The name tf.losses.sparse_softmax_cross_entropy is deprecated. Please use tf.compat.v1.losses.sparse_softmax_cross_entropy instead.
+
+WARNING:tensorflow:From c:\users\xjzb2\compo_learning\model-vs-human\modelvshuman\models\wrappers\tensorflow.py:5: The name tf.enable_eager_execution is deprecated. Please use tf.compat.v1.enable_eager_execution instead.
+
+WARNING:tensorflow:From C:\Users\xjzb2\.conda\envs\hycoclip\lib\site-packages\tf_keras\src\losses.py:2976: The name tf.losses.sparse_softmax_cross_entropy is deprecated. Please use tf.compat.v1.losses.sparse_softmax_cross_entropy instead.
+
+  5%|▌         | 1/20 [01:41<32:11, 101.64s/it] 15%|█▌        | 3/20 [01:41<07:29, 26.42s/it]  25%|██▌       | 5/20 [01:42<03:13, 12.88s/it] 35%|███▌      | 7/20 [01:42<01:37,  7.47s/it] 45%|████▌     | 9/20 [01:42<00:51,  4.69s/it] 55%|█████▌    | 11/20 [01:42<00:27,  3.08s/it] 65%|██████▌   | 13/20 [01:42<00:14,  2.08s/it] 75%|███████▌  | 15/20 [01:42<00:07,  1.44s/it] 85%|████████▌ | 17/20 [01:43<00:03,  1.01s/it] 95%|█████████▌| 19/20 [01:43<00:00,  1.38it/s]
+
+
+
+
+
+
+
+100%|██████████| 20/20 [01:45<00:00,  5.27s/it]
+accuracy (top-1): 21.41
