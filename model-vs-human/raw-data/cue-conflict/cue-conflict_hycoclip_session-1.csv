@@ -16,7 +16,7 @@ hycoclip,1,14,NaN,airplane,airplane,NaN,airplane10-truck1.png
 hycoclip,1,15,NaN,clock,airplane,NaN,airplane2-bear1.png
 hycoclip,1,16,NaN,clock,airplane,NaN,airplane2-bicycle1.png
 hycoclip,1,17,NaN,airplane,airplane,NaN,airplane2-bird3.png
-hycoclip,1,18,NaN,airplane,airplane,NaN,airplane2-bottle1.png
+hycoclip,1,18,NaN,clock,airplane,NaN,airplane2-bottle1.png
 hycoclip,1,19,NaN,airplane,airplane,NaN,airplane2-cat1.png
 hycoclip,1,20,NaN,clock,airplane,NaN,airplane2-dog1.png
 hycoclip,1,21,NaN,airplane,airplane,NaN,airplane3-airplane2.png
@@ -168,7 +168,7 @@ hycoclip,1,166,NaN,clock,bicycle,NaN,bicycle1-bottle3.png
 hycoclip,1,167,NaN,knife,bicycle,NaN,bicycle1-chair1.png
 hycoclip,1,168,NaN,clock,bicycle,NaN,bicycle1-clock3.png
 hycoclip,1,169,NaN,airplane,bicycle,NaN,bicycle1-dog3.png
-hycoclip,1,170,NaN,clock,bicycle,NaN,bicycle1-elephant2.png
+hycoclip,1,170,NaN,airplane,bicycle,NaN,bicycle1-elephant2.png
 hycoclip,1,171,NaN,clock,bicycle,NaN,bicycle1-knife3.png
 hycoclip,1,172,NaN,airplane,bicycle,NaN,bicycle1-oven1.png
 hycoclip,1,173,NaN,clock,bicycle,NaN,bicycle1-truck1.png
@@ -336,7 +336,7 @@ hycoclip,1,334,NaN,clock,boat,NaN,boat10-truck1.png
 hycoclip,1,335,NaN,keyboard,boat,NaN,boat2-airplane1.png
 hycoclip,1,336,NaN,oven,boat,NaN,boat2-bear3.png
 hycoclip,1,337,NaN,airplane,boat,NaN,boat2-bird1.png
-hycoclip,1,338,NaN,clock,boat,NaN,boat2-bottle2.png
+hycoclip,1,338,NaN,airplane,boat,NaN,boat2-bottle2.png
 hycoclip,1,339,NaN,keyboard,boat,NaN,boat2-keyboard1.png
 hycoclip,1,340,NaN,clock,boat,NaN,boat2-oven3.png
 hycoclip,1,341,NaN,airplane,boat,NaN,boat3-airplane2.png
@@ -348,7 +348,7 @@ hycoclip,1,346,NaN,clock,boat,NaN,boat3-clock3.png
 hycoclip,1,347,NaN,airplane,boat,NaN,boat3-dog3.png
 hycoclip,1,348,NaN,clock,boat,NaN,boat3-keyboard2.png
 hycoclip,1,349,NaN,oven,boat,NaN,boat4-bicycle3.png
-hycoclip,1,350,NaN,car,boat,NaN,boat4-bird1.png
+hycoclip,1,350,NaN,airplane,boat,NaN,boat4-bird1.png
 hycoclip,1,351,NaN,airplane,boat,NaN,boat4-boat3.png
 hycoclip,1,352,NaN,clock,boat,NaN,boat4-bottle2.png
 hycoclip,1,353,NaN,airplane,boat,NaN,boat4-car3.png
@@ -715,7 +715,7 @@ hycoclip,1,713,NaN,clock,chair,NaN,chair9-bicycle3.png
 hycoclip,1,714,NaN,clock,chair,NaN,chair9-bird3.png
 hycoclip,1,715,NaN,clock,chair,NaN,chair9-boat2.png
 hycoclip,1,716,NaN,clock,chair,NaN,chair9-bottle3.png
-hycoclip,1,717,NaN,boat,chair,NaN,chair9-chair3.png
+hycoclip,1,717,NaN,airplane,chair,NaN,chair9-chair3.png
 hycoclip,1,718,NaN,clock,chair,NaN,chair9-dog2.png
 hycoclip,1,719,NaN,airplane,chair,NaN,chair9-elephant1.png
 hycoclip,1,720,NaN,clock,chair,NaN,chair9-keyboard2.png
@@ -850,7 +850,7 @@ hycoclip,1,848,NaN,clock,dog,NaN,dog5-car3.png
 hycoclip,1,849,NaN,chair,dog,NaN,dog5-elephant1.png
 hycoclip,1,850,NaN,clock,dog,NaN,dog5-knife2.png
 hycoclip,1,851,NaN,airplane,dog,NaN,dog5-oven1.png
-hycoclip,1,852,NaN,knife,dog,NaN,dog5-truck2.png
+hycoclip,1,852,NaN,oven,dog,NaN,dog5-truck2.png
 hycoclip,1,853,NaN,clock,dog,NaN,dog6-bicycle1.png
 hycoclip,1,854,NaN,airplane,dog,NaN,dog6-bird1.png
 hycoclip,1,855,NaN,airplane,dog,NaN,dog6-cat1.png
@@ -860,7 +860,7 @@ hycoclip,1,858,NaN,knife,dog,NaN,dog6-truck2.png
 hycoclip,1,859,NaN,clock,dog,NaN,dog7-bird3.png
 hycoclip,1,860,NaN,clock,dog,NaN,dog7-car2.png
 hycoclip,1,861,NaN,clock,dog,NaN,dog7-chair2.png
-hycoclip,1,862,NaN,knife,dog,NaN,dog7-keyboard3.png
+hycoclip,1,862,NaN,clock,dog,NaN,dog7-keyboard3.png
 hycoclip,1,863,NaN,chair,dog,NaN,dog7-knife3.png
 hycoclip,1,864,NaN,clock,dog,NaN,dog7-oven2.png
 hycoclip,1,865,NaN,oven,dog,NaN,dog8-bear3.png
@@ -869,7 +869,7 @@ hycoclip,1,867,NaN,airplane,dog,NaN,dog8-bottle2.png
 hycoclip,1,868,NaN,airplane,dog,NaN,dog8-chair3.png
 hycoclip,1,869,NaN,clock,dog,NaN,dog8-clock2.png
 hycoclip,1,870,NaN,airplane,dog,NaN,dog8-dog3.png
-hycoclip,1,871,NaN,knife,dog,NaN,dog8-keyboard3.png
+hycoclip,1,871,NaN,keyboard,dog,NaN,dog8-keyboard3.png
 hycoclip,1,872,NaN,knife,dog,NaN,dog8-oven3.png
 hycoclip,1,873,NaN,airplane,dog,NaN,dog9-airplane3.png
 hycoclip,1,874,NaN,clock,dog,NaN,dog9-bear3.png
@@ -878,7 +878,7 @@ hycoclip,1,876,NaN,airplane,dog,NaN,dog9-boat1.png
 hycoclip,1,877,NaN,clock,dog,NaN,dog9-bottle1.png
 hycoclip,1,878,NaN,clock,dog,NaN,dog9-car1.png
 hycoclip,1,879,NaN,airplane,dog,NaN,dog9-cat1.png
-hycoclip,1,880,NaN,clock,dog,NaN,dog9-chair2.png
+hycoclip,1,880,NaN,keyboard,dog,NaN,dog9-chair2.png
 hycoclip,1,881,NaN,airplane,elephant,NaN,elephant1-airplane2.png
 hycoclip,1,882,NaN,airplane,elephant,NaN,elephant1-bear2.png
 hycoclip,1,883,NaN,airplane,elephant,NaN,elephant1-boat2.png
@@ -1188,7 +1188,7 @@ hycoclip,1,1186,NaN,airplane,oven,NaN,oven7-oven1.png
 hycoclip,1,1187,NaN,airplane,oven,NaN,oven8-cat3.png
 hycoclip,1,1188,NaN,airplane,oven,NaN,oven8-chair1.png
 hycoclip,1,1189,NaN,keyboard,oven,NaN,oven8-keyboard3.png
-hycoclip,1,1190,NaN,clock,oven,NaN,oven8-knife2.png
+hycoclip,1,1190,NaN,keyboard,oven,NaN,oven8-knife2.png
 hycoclip,1,1191,NaN,airplane,oven,NaN,oven9-airplane2.png
 hycoclip,1,1192,NaN,chair,oven,NaN,oven9-bear2.png
 hycoclip,1,1193,NaN,clock,oven,NaN,oven9-bird3.png

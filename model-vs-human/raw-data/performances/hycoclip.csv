@@ -1,2 +1,2 @@
 subj,dataset_name,metric_name,performance
-hycoclip,cue-conflict,accuracy (top-1),0.0796875
+hycoclip,cue-conflict,accuracy (top-1),0.07890625

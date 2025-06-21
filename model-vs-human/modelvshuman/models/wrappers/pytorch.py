@@ -284,12 +284,6 @@ def final_robust_encode_text(self, tokens: list[torch.Tensor], project: bool):
 
     return text_feats
 
-# (Keep all existing imports and the PytorchModel class)
-
-# (Keep all existing imports and the PytorchModel class)
-
-# (Keep all existing imports and the PytorchModel class)
-
 class HyCoCLIPModel(PytorchModel):
     def __init__(
         self,
@@ -313,18 +307,18 @@ class HyCoCLIPModel(PytorchModel):
 
         super().__init__(hyco, model_name, hyco.embed_dim, hyco.pixel_mean, hyco.pixel_std)
         self.tokenizer = Tokenizer()
+        
         project_root = Path(__file__).resolve().parents[4]
         cache_file = project_root / "hycoclip_zeroshot_weights.pt"
         
         if os.path.exists(cache_file):
             os.remove(cache_file)
-            print("Deleted old zeroshot weight cache to ensure regeneration.")
+            print("Deleted old zeroshot weight cache to ensure regeneration with final fix.")
         
         print("Generating and caching zeroshot weights...")
         zs = self._get_zeroshot_weights(imagenet_classes, imagenet_templates)
         torch.save(zs.cpu(), cache_file)
         self.zeroshot_weights = zs.to(device())
-
         hyco.to(device())
         
     def _get_zeroshot_weights(self, class_names: Sequence[str], templates: Sequence[str]) -> torch.Tensor:
@@ -357,28 +351,29 @@ class HyCoCLIPModel(PytorchModel):
         hyco = self.model
         hyco.eval()
         with torch.no_grad():
-            hyco.curv.data = torch.clamp(hyco.curv.data, **hyco._curv_minmax)
             curv = hyco.curv.exp()
 
-            imgs = undo_default_preprocessing(images)
-            imgs = [self.preprocess()(ToPILImage()(im)) for im in imgs]
-            batch = torch.stack(imgs, dim=0).to(device())
+            # THE FINAL FIX: The 'images' tensor from the dataloader is already 
+            # normalized. We pass it directly to the model's vision encoder.
+            batch = images.to(device())
 
-            img_feats_euclidean = hyco.visual_proj(hyco.visual((batch - hyco.pixel_mean) / hyco.pixel_std))
+            # --- Explicit Image Feature Extraction and Projection ---
+            # DO NOT re-normalize. The vision encoder expects a normalized tensor.
+            img_feats_euclidean = hyco.visual_proj(hyco.visual(batch))
+            
             img_feats_hyperbolic = img_feats_euclidean * hyco.visual_alpha.exp()
             img_feats = L.exp_map0(img_feats_hyperbolic.float(), curv)
             
+            # --- Calculate Logits using Hyperbolic Distance ---
             logits = -L.pairwise_dist(img_feats, self.zeroshot_weights.T, curv)
             
-            hyco.logit_scale.data = torch.clamp(hyco.logit_scale.data, max=4.6052)
             logits = hyco.logit_scale.exp() * logits
             
             return logits.detach().cpu().numpy()
 
     def preprocess(self):
-        vp = self.model.visual.patch_embed
-        raw = vp.img_size if hasattr(vp, "img_size") else 224
-        n_px = raw[0] if isinstance(raw, (tuple, list)) else raw
-        return Compose([Resize(n_px, interpolation=Image.BICUBIC), CenterCrop(n_px), ToTensor()])
+        # This function is not used by our corrected forward_batch method,
+        # but we leave it here to avoid breaking any other part of the codebase.
+        pass
         
         #python -m modelvshuman --models hycoclip --datasets cue-conflict --batch-size 64 --num-workers 16
