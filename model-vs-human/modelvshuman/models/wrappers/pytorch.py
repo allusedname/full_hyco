@@ -225,6 +225,51 @@ from hycoclip.encoders.image_encoders import build_timm_vit
 from hycoclip.encoders.text_encoders  import TransformerTextEncoder
 from hycoclip.tokenizer import Tokenizer
 
+def final_robust_encode_text(self, tokens: list[torch.Tensor], project: bool):
+    """
+    A robust version of encode_text that explicitly finds the last non-padding
+    token, which corresponds to the EOT token, to extract text features.
+    This function will be monkey-patched onto the model instance.
+    """
+    # Truncate tokens that are longer than context_length
+    context_length = self.textual.context_length
+    for i, inst_tokens in enumerate(tokens):
+        if len(inst_tokens) > context_length:
+            eot_token = inst_tokens[-1:]
+            inst_tokens = torch.cat([
+                inst_tokens[:context_length - 1],
+                eot_token
+            ])
+            tokens[i] = inst_tokens
+
+    # Pad all tokens on the right (default pad value is 0)
+    tokens_padded = torch.nn.utils.rnn.pad_sequence(tokens, batch_first=True)
+    tokens_padded = tokens_padded.to(self.device)
+
+    # Get the features for all tokens
+    text_feats = self.textual(tokens_padded)
+
+    # Find the index of the last non-padding token for each sentence
+    eos_indices = torch.count_nonzero(tokens_padded, dim=1) - 1
+    
+    batch_idxs = torch.arange(text_feats.shape[0], device=self.device)
+    
+    # Extract the features at the EOT position
+    text_feats = text_feats[batch_idxs, eos_indices]
+    
+    # Apply the projection layer from the original model
+    text_feats = self.textual_proj(text_feats)
+
+    # This part handles the projection for MERU/HyCoCLIP, inheriting its logic
+    if hasattr(self, 'textual_alpha') and project:
+        text_feats = text_feats * self.textual_alpha.exp()
+        with torch.autocast(self.device.type, dtype=torch.float32):
+             text_feats = L.exp_map0(text_feats, self.curv.exp())
+    elif project:
+        text_feats = torch.nn.functional.normalize(text_feats, dim=-1)
+
+    return text_feats
+
 class HyCoCLIPModel(PytorchModel):
     def __init__(
         self,
@@ -261,6 +306,12 @@ class HyCoCLIPModel(PytorchModel):
         state = ckpt.get("model", ckpt)
         hyco.load_state_dict(state, strict=True)
 
+        # *** APPLY THE MONKEY PATCH HERE ***
+        # This replaces the model's flawed text encoder with our robust version
+        import types
+        hyco.encode_text = types.MethodType(final_robust_encode_text, hyco)
+        print("Applied robust text encoder patch to HyCoCLIP.")
+
         super().__init__(
             hyco,
             model_name,
@@ -274,6 +325,10 @@ class HyCoCLIPModel(PytorchModel):
         project_root = Path(__file__).resolve().parents[4]
         cache_file = project_root / "hycoclip_zeroshot_weights.pt"
         
+        # For debugging, it can be useful to delete the cache file to force regeneration
+        # if os.path.exists(cache_file):
+        #    os.remove(cache_file)
+        
         if os.path.exists(cache_file):
             self.zeroshot_weights = torch.load(cache_file, map_location="cpu").to(device())
         else:
@@ -283,7 +338,6 @@ class HyCoCLIPModel(PytorchModel):
 
         hyco.to(device())
         
-
     def _get_zeroshot_weights(
         self,
         class_names: Sequence[str],
@@ -296,28 +350,18 @@ class HyCoCLIPModel(PytorchModel):
             ws = []
             for cls in tqdm(class_names, desc="HyCoCLIP zeroshot"):
                 prompts = [t.format(cls) for t in templates]
-                # Tokenize using the instance created in __init__
                 toks = self.tokenizer(prompts)
-
-                # Get the hyperbolic features for the text prompts
-                # The encode_text function will move tensors to the correct device
+                
                 text_feats = hyco.encode_text(toks, project=True)
-
-                # Average the features in the ambient space and re-project.
-                # This is an approximation of the Frechet mean.
-                # CRUCIALLY, we do not use Euclidean L2 normalization here.
-                mean_feats = text_feats.mean(dim=0)
-
-                # Re-project the averaged vector back onto the hyperboloid
-                # to ensure it's a valid hyperbolic representation.
-                # We do this by logging to the tangent space and mapping back.
                 curv = hyco.curv.exp()
-                mean_feats_tangent = L.log_map0(mean_feats.unsqueeze(0), curv)
-                mean_feats_hyp = L.exp_map0(mean_feats_tangent, curv).squeeze(0)
 
-                ws.append(mean_feats_hyp)
+                # FIX 1: Correctly average features in the tangent space.
+                tangent_feats = L.log_map0(text_feats, curv)
+                mean_tangent_feats = tangent_feats.mean(dim=0, keepdim=True)
+                mean_hyp_feats = L.exp_map0(mean_tangent_feats, curv).squeeze(0)
 
-            # Stack the weights for all classes
+                ws.append(mean_hyp_feats)
+
             zeroshot_weights = torch.stack(ws, dim=1).to(dev)
 
         return zeroshot_weights
@@ -326,27 +370,23 @@ class HyCoCLIPModel(PytorchModel):
         hyco = self.model
         hyco.eval()
         with torch.no_grad():
-            # Ensure model parameters are clamped as in training
             hyco.curv.data = torch.clamp(hyco.curv.data, **hyco._curv_minmax)
             hyco.visual_alpha.data = torch.clamp(hyco.visual_alpha.data, max=0.0)
             hyco.textual_alpha.data = torch.clamp(hyco.textual_alpha.data, max=0.0)
             curv = hyco.curv.exp()
 
-            # The default preprocessing needs to be undone before applying the model's specific preprocessing
             imgs = undo_default_preprocessing(images)
             imgs = [self.preprocess()(ToPILImage()(im)) for im in imgs]
             batch = torch.stack(imgs, dim=0).to(device())
 
-            # Get hyperbolic image features
             img_feats = hyco.encode_image(batch, project=True)
 
-            # *** THIS IS THE CRITICAL FIX ***
-            # Instead of a dot product, we calculate the negative hyperbolic distance.
-            # A smaller distance means a higher similarity, so we negate it for the logits.
-            # The shape of zeroshot_weights is [D, C], so we take its transpose.
+            # *** CRITICAL FIX 3: REMOVED INCORRECT L2 NORMALIZATION ***
+            # The following line is the primary source of the error and has been removed:
+            # img_feats = img_feats / img_feats.norm(dim=-1, keepdim=True)
+
             logits = -L.pairwise_dist(img_feats, self.zeroshot_weights.T, curv)
 
-            # Scale the logits by the learned temperature
             hyco.logit_scale.data = torch.clamp(hyco.logit_scale.data, max=4.6052)
             logits = hyco.logit_scale.exp() * logits
 
@@ -357,34 +397,12 @@ class HyCoCLIPModel(PytorchModel):
         raw = vp.img_size if hasattr(vp, "img_size") else 224
         n_px = raw[0] if isinstance(raw, (tuple, list)) else raw
 
+        # FIX 2: Removed Normalize transform to prevent double normalization.
         return Compose([
             Resize(n_px, interpolation=Image.BICUBIC),
             CenterCrop(n_px),
             ToTensor(),
-            Normalize(self.model.pixel_mean, self.model.pixel_std),
         ])
 
-    # def forward_batch(self, images: torch.Tensor) -> np.ndarray:
-    #     hyco = self.model
-    #     hyco.eval()
-    #     with torch.no_grad():
-    #         hyco.curv.data          = torch.clamp(hyco.curv.data, **hyco._curv_minmax)
-    #         hyco.visual_alpha.data  = torch.clamp(hyco.visual_alpha.data,  max=0.0)
-    #         hyco.textual_alpha.data = torch.clamp(hyco.textual_alpha.data, max=0.0)
-    #         curv = hyco.curv.exp()
-
-    #         imgs = undo_default_preprocessing(images)
-    #         imgs = [ self.preprocess()(ToPILImage()(im)) for im in imgs ]
-    #         batch = torch.stack(imgs, dim=0).to(device())
-
-    #         img_feats = hyco.encode_image(batch, project=True)
-    #         img_feats = img_feats / img_feats.norm(dim=-1, keepdim=True) # [B*D]
-
-    #         # Use hyperbolic distance for similarity
-    #         logits = -L.pairwise_dist(img_feats, self.zeroshot_weights.T, curv)
-    #         hyco.logit_scale.data = torch.clamp(hyco.logit_scale.data, max=4.6052)
-    #         logits = hyco.logit_scale.exp() * logits
-
-    #         return logits.detach().cpu().numpy()
         
         #python -m modelvshuman --models hycoclip --datasets cue-conflict --batch-size 64 --num-workers 16
