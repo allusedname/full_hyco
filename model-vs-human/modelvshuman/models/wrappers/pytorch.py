@@ -22,14 +22,19 @@ def device():
 
 def undo_default_preprocessing(images):
     """Convenience function: undo standard preprocessing."""
+    assert isinstance(images, torch.Tensor)
+    
+    # ====================================================================
+    # THE FIX for the device mismatch RuntimeError
+    # Get the device from the input tensor itself for robust operation
+    tensor_device = images.device
+    default_mean = torch.tensor([0.485, 0.456, 0.406], device=tensor_device)
+    default_std = torch.tensor([0.229, 0.224, 0.225], device=tensor_device)
+    # ====================================================================
 
-    assert type(images) is torch.Tensor
-    default_mean = torch.Tensor([0.485, 0.456, 0.406]).to(device())
-    default_std = torch.Tensor([0.229, 0.224, 0.225]).to(device())
-
-    images *= default_std[None, :, None, None]
-    images += default_mean[None, :, None, None]
-
+    # Reshape mean and std to be broadcastable
+    images = images * default_std.view(1, -1, 1, 1)
+    images = images + default_mean.view(1, -1, 1, 1)
     return images
 
 class PytorchModel(AbstractModel):
@@ -260,6 +265,15 @@ def final_robust_encode_text(self, tokens: list[torch.Tensor], project: bool):
     # Apply the projection layer from the original model
     text_feats = self.textual_proj(text_feats)
 
+     # =================================================================================
+    # == THE CRITICAL FIX ==
+    # The pre-trained model's `textual_proj` layer has a bug and outputs a 513-dim
+    # vector instead of a 512-dim one. We truncate the last dimension to correct this.
+    if text_feats.shape[-1] != self.embed_dim:
+        text_feats = text_feats[:, :self.embed_dim]
+    # =================================================================================
+
+
     # This part handles the projection for MERU/HyCoCLIP, inheriting its logic
     if hasattr(self, 'textual_alpha') and project:
         text_feats = text_feats * self.textual_alpha.exp()
@@ -270,6 +284,12 @@ def final_robust_encode_text(self, tokens: list[torch.Tensor], project: bool):
 
     return text_feats
 
+# (Keep all existing imports and the PytorchModel class)
+
+# (Keep all existing imports and the PytorchModel class)
+
+# (Keep all existing imports and the PytorchModel class)
+
 class HyCoCLIPModel(PytorchModel):
     def __init__(
         self,
@@ -277,93 +297,60 @@ class HyCoCLIPModel(PytorchModel):
         *args,
         arch: str = "vit_small_patch16_224"
     ):
-        visual = build_timm_vit(
-            arch=arch,
-            global_pool="token",
-            grad_checkpointing=False,
-        )
-        textual = TransformerTextEncoder(
-            arch="L12_W512_A8",
-            vocab_size=49408,
-            context_length=77,
-        )
+        visual = build_timm_vit(arch=arch, global_pool="token", grad_checkpointing=False)
+        textual = TransformerTextEncoder(arch="L12_W512_A8", vocab_size=49408, context_length=77)
         hyco = HyCoCLIP(
-            visual=visual,
-            textual=textual,
-            embed_dim=512,
-            curv_init=1.0,
-            learn_curv=True,
-            entail_weight=0.0,
-            use_boxes = True,
-            pixel_mean=(0.485, 0.456, 0.406),
+            visual=visual, textual=textual, embed_dim=512, curv_init=1.0, learn_curv=True,
+            entail_weight=0.0, use_boxes=True, pixel_mean=(0.485, 0.456, 0.406),
             pixel_std=(0.229, 0.224, 0.225),
         )
 
         base_models_dir = Path(__file__).resolve().parent.parent
         checkpoint_path = base_models_dir / "hycoclip_vit_s.pth"
-
         ckpt = torch.load(checkpoint_path, map_location="cpu", weights_only=False)
         state = ckpt.get("model", ckpt)
         hyco.load_state_dict(state, strict=True)
 
-        # *** APPLY THE MONKEY PATCH HERE ***
-        # This replaces the model's flawed text encoder with our robust version
-        import types
-        hyco.encode_text = types.MethodType(final_robust_encode_text, hyco)
-        print("Applied robust text encoder patch to HyCoCLIP.")
-
-        super().__init__(
-            hyco,
-            model_name,
-            hyco.embed_dim,
-            hyco.pixel_mean,
-            hyco.pixel_std,
-        )
-
+        super().__init__(hyco, model_name, hyco.embed_dim, hyco.pixel_mean, hyco.pixel_std)
         self.tokenizer = Tokenizer()
-
         project_root = Path(__file__).resolve().parents[4]
         cache_file = project_root / "hycoclip_zeroshot_weights.pt"
         
-        # For debugging, it can be useful to delete the cache file to force regeneration
-        # if os.path.exists(cache_file):
-        #    os.remove(cache_file)
-        
         if os.path.exists(cache_file):
-            self.zeroshot_weights = torch.load(cache_file, map_location="cpu").to(device())
-        else:
-            zs = self._get_zeroshot_weights(imagenet_classes, imagenet_templates)
-            torch.save(zs.cpu(), cache_file)
-            self.zeroshot_weights = zs.to(device())
+            os.remove(cache_file)
+            print("Deleted old zeroshot weight cache to ensure regeneration.")
+        
+        print("Generating and caching zeroshot weights...")
+        zs = self._get_zeroshot_weights(imagenet_classes, imagenet_templates)
+        torch.save(zs.cpu(), cache_file)
+        self.zeroshot_weights = zs.to(device())
 
         hyco.to(device())
         
-    def _get_zeroshot_weights(
-        self,
-        class_names: Sequence[str],
-        templates: Sequence[str]
-    ) -> torch.Tensor:
+    def _get_zeroshot_weights(self, class_names: Sequence[str], templates: Sequence[str]) -> torch.Tensor:
         hyco = self.model
-        dev  = device()
-
+        dev = device()
         with torch.no_grad():
             ws = []
             for cls in tqdm(class_names, desc="HyCoCLIP zeroshot"):
                 prompts = [t.format(cls) for t in templates]
                 toks = self.tokenizer(prompts)
                 
-                text_feats = hyco.encode_text(toks, project=True)
-                curv = hyco.curv.exp()
+                toks_padded = torch.nn.utils.rnn.pad_sequence(toks, batch_first=True).to(dev)
+                all_token_feats = hyco.textual(toks_padded)
+                
+                eos_indices = torch.count_nonzero(toks_padded, dim=1) - 1
+                batch_idxs = torch.arange(all_token_feats.shape[0], device=dev)
+                eot_feats = all_token_feats[batch_idxs, eos_indices]
 
-                # FIX 1: Correctly average features in the tangent space.
-                tangent_feats = L.log_map0(text_feats, curv)
-                mean_tangent_feats = tangent_feats.mean(dim=0, keepdim=True)
-                mean_hyp_feats = L.exp_map0(mean_tangent_feats, curv).squeeze(0)
+                euclidean_feats = hyco.textual_proj(eot_feats)
+                mean_euclidean_feat = euclidean_feats.mean(dim=0, keepdim=True)
 
+                hyperbolic_feat = mean_euclidean_feat * hyco.textual_alpha.exp()
+                mean_hyp_feats = L.exp_map0(hyperbolic_feat.float(), hyco.curv.exp()).squeeze(0)
                 ws.append(mean_hyp_feats)
 
             zeroshot_weights = torch.stack(ws, dim=1).to(dev)
-
         return zeroshot_weights
 
     def forward_batch(self, images: torch.Tensor) -> np.ndarray:
@@ -371,38 +358,27 @@ class HyCoCLIPModel(PytorchModel):
         hyco.eval()
         with torch.no_grad():
             hyco.curv.data = torch.clamp(hyco.curv.data, **hyco._curv_minmax)
-            hyco.visual_alpha.data = torch.clamp(hyco.visual_alpha.data, max=0.0)
-            hyco.textual_alpha.data = torch.clamp(hyco.textual_alpha.data, max=0.0)
             curv = hyco.curv.exp()
 
             imgs = undo_default_preprocessing(images)
             imgs = [self.preprocess()(ToPILImage()(im)) for im in imgs]
             batch = torch.stack(imgs, dim=0).to(device())
 
-            img_feats = hyco.encode_image(batch, project=True)
-
-            # *** CRITICAL FIX 3: REMOVED INCORRECT L2 NORMALIZATION ***
-            # The following line is the primary source of the error and has been removed:
-            # img_feats = img_feats / img_feats.norm(dim=-1, keepdim=True)
-
+            img_feats_euclidean = hyco.visual_proj(hyco.visual((batch - hyco.pixel_mean) / hyco.pixel_std))
+            img_feats_hyperbolic = img_feats_euclidean * hyco.visual_alpha.exp()
+            img_feats = L.exp_map0(img_feats_hyperbolic.float(), curv)
+            
             logits = -L.pairwise_dist(img_feats, self.zeroshot_weights.T, curv)
-
+            
             hyco.logit_scale.data = torch.clamp(hyco.logit_scale.data, max=4.6052)
             logits = hyco.logit_scale.exp() * logits
-
+            
             return logits.detach().cpu().numpy()
 
     def preprocess(self):
         vp = self.model.visual.patch_embed
         raw = vp.img_size if hasattr(vp, "img_size") else 224
         n_px = raw[0] if isinstance(raw, (tuple, list)) else raw
-
-        # FIX 2: Removed Normalize transform to prevent double normalization.
-        return Compose([
-            Resize(n_px, interpolation=Image.BICUBIC),
-            CenterCrop(n_px),
-            ToTensor(),
-        ])
-
+        return Compose([Resize(n_px, interpolation=Image.BICUBIC), CenterCrop(n_px), ToTensor()])
         
         #python -m modelvshuman --models hycoclip --datasets cue-conflict --batch-size 64 --num-workers 16
