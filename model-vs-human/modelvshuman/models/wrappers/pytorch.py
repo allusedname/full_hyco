@@ -115,48 +115,76 @@ class ViTPytorchModel(PytorchModel):
 
 
 class ClipPytorchModel(PytorchModel):
-
     def __init__(self, model, model_name, *args):
         super(ClipPytorchModel, self).__init__(model, model_name, *args)
-        self.zeroshot_weights=self._get_zeroshot_weights(imagenet_classes, imagenet_templates)
-        
+        # Precompute zero-shot weights
+        self.zeroshot_weights = self._get_zeroshot_weights(imagenet_classes, imagenet_templates)
+
     def _get_zeroshot_weights(self, class_names, templates):
+        device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
         with torch.no_grad():
             zeroshot_weights = []
             for class_name in tqdm(class_names):
-                texts = [template.format(class_name) for template in templates]  # format with class
-                texts = clip.tokenize(texts).to(device())  # tokenize
-                class_embeddings = self.model.encode_text(texts)  # embed with text encoder
-                class_embeddings /= class_embeddings.norm(dim=-1, keepdim=True)
-                class_embedding = class_embeddings.mean(dim=0)
-                class_embedding /= class_embedding.norm()
-                zeroshot_weights.append(class_embedding)
-            zeroshot_weights = torch.stack(zeroshot_weights, dim=1).to(device())
-
+                texts = [template.format(class_name) for template in templates]
+                tokenized = clip.tokenize(texts).to(device)
+                embeddings = self.model.encode_text(tokenized)
+                embeddings /= embeddings.norm(dim=-1, keepdim=True)
+                class_emb = embeddings.mean(dim=0)
+                class_emb /= class_emb.norm()
+                zeroshot_weights.append(class_emb)
+            zeroshot_weights = torch.stack(zeroshot_weights, dim=1).to(device)
         return zeroshot_weights
 
     def preprocess(self):
         n_px = self.model.visual.input_resolution
         return Compose([
-            Resize(n_px, interpolation=PIL.Image.BICUBIC),
+            Resize(n_px, interpolation=Image.BICUBIC),
             CenterCrop(n_px),
-            # lambda image: image.convert("RGB"),
             ToTensor(),
-            Normalize((0.48145466, 0.4578275, 0.40821073), (0.26862954, 0.26130258, 0.27577711)),
+            Normalize((0.48145466, 0.4578275, 0.40821073),
+                      (0.26862954, 0.26130258, 0.27577711)),
         ])
 
     def forward_batch(self, images):
-        assert type(images) is torch.Tensor
+        # images: Tensor[C,H,W] normalized by default loader
+        assert isinstance(images, torch.Tensor)
+        device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
+        # Undo default preprocessing
         images = undo_default_preprocessing(images)
-        images = [self.preprocess()(ToPILImage()(image)) for image in images]
-        images = torch.Tensor(np.stack(images, axis=0)).to(device())
+        # Apply CLIP preprocess
+        proc = self.preprocess()
+        imgs = [proc(ToPILImage()(img)) for img in images]
+        batch = torch.stack(imgs, axis=0).to(device)
 
+        # Debug pixel patch
+        patch = batch[0, :, 100:110, 100:110]
+        print(f"[CLIP DEBUG] patch mean={patch.mean().item():.4f}, std={patch.std().item():.4f}")
+
+        # Encode images
         self.model.eval()
-        
-        image_features = self.model.encode_image(images)
+        image_features = self.model.encode_image(batch)
         image_features /= image_features.norm(dim=-1, keepdim=True)
+
+        # Debug feature samples
+        for i in range(min(3, image_features.size(0))):
+            print(f"[CLIP DEBUG] clip_feats[{i}][:10]={image_features[i, :10].cpu().numpy()}")
+        print(f"[CLIP DEBUG] clip_feats mean={image_features.mean().item():.4f}, std={image_features.std().item():.4f}")
+
+        # Sanity test: white vs black
+        white = torch.ones_like(batch[0:1]).to(device)
+        black = torch.zeros_like(batch[0:1]).to(device)
+        w_feat = self.model.encode_image(white)
+        w_feat /= w_feat.norm(dim=-1, keepdim=True)
+        b_feat = self.model.encode_image(black)
+        b_feat /= b_feat.norm(dim=-1, keepdim=True)
+        wb_dist = (w_feat - b_feat).norm(dim=-1)
+        print(f"[CLIP DEBUG] white-black dist={wb_dist.item():.4f}")
+
+        # Compute logits and debug
         logits = 100. * image_features @ self.zeroshot_weights
+        print(f"[CLIP DEBUG] logits mean={logits.mean().item():.4f}, std={logits.std().item():.4f}")
+
         return self.to_numpy(logits)
 
 
@@ -217,6 +245,7 @@ class SwagPytorchModel(PytorchModel):
         return self.to_numpy(logits)    
 
 import os
+import timm
 from tqdm import tqdm
 from typing import Sequence
 from PIL import Image
@@ -230,13 +259,17 @@ from hycoclip.encoders.image_encoders import build_timm_vit
 from hycoclip.encoders.text_encoders  import TransformerTextEncoder
 from hycoclip.tokenizer import Tokenizer
 
+CHECKPOINT_PATH = "/home/xjzb2/compo_learning/model-vs-human/modelvshuman/models/hycoclip_vit_s.pth"
+
+
+from hycoclip.tokenizer import Tokenizer
+
 def final_robust_encode_text(self, tokens: list[torch.Tensor], project: bool):
     """
     A robust version of encode_text that explicitly finds the last non-padding
-    token, which corresponds to the EOT token, to extract text features.
+    token and fixes the textual_proj layer's dimension bug.
     This function will be monkey-patched onto the model instance.
     """
-    # Truncate tokens that are longer than context_length
     context_length = self.textual.context_length
     for i, inst_tokens in enumerate(tokens):
         if len(inst_tokens) > context_length:
@@ -247,34 +280,22 @@ def final_robust_encode_text(self, tokens: list[torch.Tensor], project: bool):
             ])
             tokens[i] = inst_tokens
 
-    # Pad all tokens on the right (default pad value is 0)
     tokens_padded = torch.nn.utils.rnn.pad_sequence(tokens, batch_first=True)
     tokens_padded = tokens_padded.to(self.device)
 
-    # Get the features for all tokens
     text_feats = self.textual(tokens_padded)
 
-    # Find the index of the last non-padding token for each sentence
     eos_indices = torch.count_nonzero(tokens_padded, dim=1) - 1
     
     batch_idxs = torch.arange(text_feats.shape[0], device=self.device)
     
-    # Extract the features at the EOT position
     text_feats = text_feats[batch_idxs, eos_indices]
     
-    # Apply the projection layer from the original model
     text_feats = self.textual_proj(text_feats)
 
-     # =================================================================================
-    # == THE CRITICAL FIX ==
-    # The pre-trained model's `textual_proj` layer has a bug and outputs a 513-dim
-    # vector instead of a 512-dim one. We truncate the last dimension to correct this.
     if text_feats.shape[-1] != self.embed_dim:
         text_feats = text_feats[:, :self.embed_dim]
-    # =================================================================================
 
-
-    # This part handles the projection for MERU/HyCoCLIP, inheriting its logic
     if hasattr(self, 'textual_alpha') and project:
         text_feats = text_feats * self.textual_alpha.exp()
         with torch.autocast(self.device.type, dtype=torch.float32):
@@ -291,36 +312,46 @@ class HyCoCLIPModel(PytorchModel):
         *args,
         arch: str = "vit_small_patch16_224"
     ):
+        # Build vision and text backbones
         visual = build_timm_vit(arch=arch, global_pool="token", grad_checkpointing=False)
         textual = TransformerTextEncoder(arch="L12_W512_A8", vocab_size=49408, context_length=77)
         hyco = HyCoCLIP(
-            visual=visual, textual=textual, embed_dim=512, curv_init=1.0, learn_curv=True,
-            entail_weight=0.0, use_boxes=True, pixel_mean=(0.485, 0.456, 0.406),
+            visual=visual,
+            textual=textual,
+            embed_dim=512,
+            curv_init=1.0,
+            learn_curv=True,
+            entail_weight=0.0,
+            use_boxes=True,
+            pixel_mean=(0.485, 0.456, 0.406),
             pixel_std=(0.229, 0.224, 0.225),
         )
-
+        # Load weights
         base_models_dir = Path(__file__).resolve().parent.parent
-        checkpoint_path = base_models_dir / "hycoclip_vit_s.pth"
-        ckpt = torch.load(checkpoint_path, map_location="cpu", weights_only=False)
+        ckpt_path = base_models_dir / "hycoclip_vit_s.pth"
+        ckpt = torch.load(ckpt_path, map_location="cpu", weights_only=False)
         state = ckpt.get("model", ckpt)
         hyco.load_state_dict(state, strict=True)
 
+        # Swap in the robust text encoder method
+        import types
+        hyco.encode_text = types.MethodType(final_robust_encode_text, hyco)
+
+        # Initialize the PytorchModel wrapper
         super().__init__(hyco, model_name, hyco.embed_dim, hyco.pixel_mean, hyco.pixel_std)
         self.tokenizer = Tokenizer()
-        
+
+        # Prepare or load cached zero-shot weights
         project_root = Path(__file__).resolve().parents[4]
         cache_file = project_root / "hycoclip_zeroshot_weights.pt"
-        
-        if os.path.exists(cache_file):
-            os.remove(cache_file)
-            print("Deleted old zeroshot weight cache to ensure regeneration with final fix.")
-        
-        print("Generating and caching zeroshot weights...")
-        zs = self._get_zeroshot_weights(imagenet_classes, imagenet_templates)
-        torch.save(zs.cpu(), cache_file)
+        if cache_file.exists():
+            zs = torch.load(cache_file)
+        else:
+            zs = self._get_zeroshot_weights(imagenet_classes, imagenet_templates)
+            torch.save(zs.cpu(), cache_file)
         self.zeroshot_weights = zs.to(device())
         hyco.to(device())
-        
+
     def _get_zeroshot_weights(self, class_names: Sequence[str], templates: Sequence[str]) -> torch.Tensor:
         hyco = self.model
         dev = device()
@@ -329,21 +360,14 @@ class HyCoCLIPModel(PytorchModel):
             for cls in tqdm(class_names, desc="HyCoCLIP zeroshot"):
                 prompts = [t.format(cls) for t in templates]
                 toks = self.tokenizer(prompts)
-                
-                toks_padded = torch.nn.utils.rnn.pad_sequence(toks, batch_first=True).to(dev)
-                all_token_feats = hyco.textual(toks_padded)
-                
-                eos_indices = torch.count_nonzero(toks_padded, dim=1) - 1
-                batch_idxs = torch.arange(all_token_feats.shape[0], device=dev)
-                eot_feats = all_token_feats[batch_idxs, eos_indices]
-
-                euclidean_feats = hyco.textual_proj(eot_feats)
-                mean_euclidean_feat = euclidean_feats.mean(dim=0, keepdim=True)
-
-                hyperbolic_feat = mean_euclidean_feat * hyco.textual_alpha.exp()
-                mean_hyp_feats = L.exp_map0(hyperbolic_feat.float(), hyco.curv.exp()).squeeze(0)
-                ws.append(mean_hyp_feats)
-
+                # Euclidean pooling
+                eu_feats = hyco.encode_text(toks, project=False)
+                mean_eu = eu_feats.mean(dim=0, keepdim=True)
+                # Hyperbolic map
+                hyper_feat = mean_eu * hyco.textual_alpha.exp()
+                with torch.autocast(dev.type, dtype=torch.float32):
+                    hyp_feat = L.exp_map0(hyper_feat.float(), hyco.curv.exp()).squeeze(0)
+                ws.append(hyp_feat)
             zeroshot_weights = torch.stack(ws, dim=1).to(dev)
         return zeroshot_weights
 
@@ -351,29 +375,21 @@ class HyCoCLIPModel(PytorchModel):
         hyco = self.model
         hyco.eval()
         with torch.no_grad():
+            # Undo default loader preprocessing
+            images_unnorm = undo_default_preprocessing(images)
+            # Encode into hyperbolic space
+            img_feats = hyco.encode_image(images_unnorm, project=True)
+            # Compute logits via hyperbolic distance
             curv = hyco.curv.exp()
-
-            # THE FINAL FIX: The 'images' tensor from the dataloader is already 
-            # normalized. We pass it directly to the model's vision encoder.
-            batch = images.to(device())
-
-            # --- Explicit Image Feature Extraction and Projection ---
-            # DO NOT re-normalize. The vision encoder expects a normalized tensor.
-            img_feats_euclidean = hyco.visual_proj(hyco.visual(batch))
-            
-            img_feats_hyperbolic = img_feats_euclidean * hyco.visual_alpha.exp()
-            img_feats = L.exp_map0(img_feats_hyperbolic.float(), curv)
-            
-            # --- Calculate Logits using Hyperbolic Distance ---
             logits = -L.pairwise_dist(img_feats, self.zeroshot_weights.T, curv)
-            
             logits = hyco.logit_scale.exp() * logits
-            
             return logits.detach().cpu().numpy()
-
+        
     def preprocess(self):
-        # This function is not used by our corrected forward_batch method,
-        # but we leave it here to avoid breaking any other part of the codebase.
         pass
+
+
+
+
         
         #python -m modelvshuman --models hycoclip --datasets cue-conflict --batch-size 64 --num-workers 16
