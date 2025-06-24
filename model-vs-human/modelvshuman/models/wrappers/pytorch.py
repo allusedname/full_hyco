@@ -117,22 +117,21 @@ class ViTPytorchModel(PytorchModel):
 class ClipPytorchModel(PytorchModel):
     def __init__(self, model, model_name, *args):
         super(ClipPytorchModel, self).__init__(model, model_name, *args)
-        # Precompute zero-shot weights
         self.zeroshot_weights = self._get_zeroshot_weights(imagenet_classes, imagenet_templates)
 
     def _get_zeroshot_weights(self, class_names, templates):
-        device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
         with torch.no_grad():
             zeroshot_weights = []
             for class_name in tqdm(class_names):
                 texts = [template.format(class_name) for template in templates]
-                tokenized = clip.tokenize(texts).to(device)
-                embeddings = self.model.encode_text(tokenized)
-                embeddings /= embeddings.norm(dim=-1, keepdim=True)
-                class_emb = embeddings.mean(dim=0)
-                class_emb /= class_emb.norm()
-                zeroshot_weights.append(class_emb)
-            zeroshot_weights = torch.stack(zeroshot_weights, dim=1).to(device)
+                texts = clip.tokenize(texts).to(device())
+                class_embeddings = self.model.encode_text(texts)
+                class_embeddings /= class_embeddings.norm(dim=-1, keepdim=True)
+                class_embedding = class_embeddings.mean(dim=0)
+                class_embedding /= class_embedding.norm()
+                zeroshot_weights.append(class_embedding)
+            zeroshot_weights = torch.stack(zeroshot_weights, dim=1).to(device())
+
         return zeroshot_weights
 
     def preprocess(self):
@@ -146,45 +145,16 @@ class ClipPytorchModel(PytorchModel):
         ])
 
     def forward_batch(self, images):
-        # images: Tensor[C,H,W] normalized by default loader
-        assert isinstance(images, torch.Tensor)
-        device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+        assert type(images) is torch.Tensor
 
-        # Undo default preprocessing
         images = undo_default_preprocessing(images)
-        # Apply CLIP preprocess
-        proc = self.preprocess()
-        imgs = [proc(ToPILImage()(img)) for img in images]
-        batch = torch.stack(imgs, axis=0).to(device)
+        images = [self.preprocess()(ToPILImage()(image)) for image in images]
+        images = torch.Tensor(np.stack(images, axis=0)).to(device())
 
-        # Debug pixel patch
-        patch = batch[0, :, 100:110, 100:110]
-        print(f"[CLIP DEBUG] patch mean={patch.mean().item():.4f}, std={patch.std().item():.4f}")
-
-        # Encode images
         self.model.eval()
-        image_features = self.model.encode_image(batch)
+        image_features = self.model.encode_image(images)
         image_features /= image_features.norm(dim=-1, keepdim=True)
-
-        # Debug feature samples
-        for i in range(min(3, image_features.size(0))):
-            print(f"[CLIP DEBUG] clip_feats[{i}][:10]={image_features[i, :10].cpu().numpy()}")
-        print(f"[CLIP DEBUG] clip_feats mean={image_features.mean().item():.4f}, std={image_features.std().item():.4f}")
-
-        # Sanity test: white vs black
-        white = torch.ones_like(batch[0:1]).to(device)
-        black = torch.zeros_like(batch[0:1]).to(device)
-        w_feat = self.model.encode_image(white)
-        w_feat /= w_feat.norm(dim=-1, keepdim=True)
-        b_feat = self.model.encode_image(black)
-        b_feat /= b_feat.norm(dim=-1, keepdim=True)
-        wb_dist = (w_feat - b_feat).norm(dim=-1)
-        print(f"[CLIP DEBUG] white-black dist={wb_dist.item():.4f}")
-
-        # Compute logits and debug
         logits = 100. * image_features @ self.zeroshot_weights
-        print(f"[CLIP DEBUG] logits mean={logits.mean().item():.4f}, std={logits.std().item():.4f}")
-
         return self.to_numpy(logits)
 
 
