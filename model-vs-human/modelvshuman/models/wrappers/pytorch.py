@@ -280,47 +280,40 @@ class HyCoCLIPModel(PytorchModel):
         self,
         model_name: str,
         *args,
-        arch: str = "vit_small_patch16_224"
+        arch: str = "vit_small_patch16_224",
+        checkpoint_path: str = "modelvshuman/models/hycoclip_vit_s.pth"
     ):
-        # Build vision and text backbones
+        # Build vision and text backbones from hycoclip codebase
         visual = build_timm_vit(arch=arch, global_pool="token", grad_checkpointing=False)
         textual = TransformerTextEncoder(arch="L12_W512_A8", vocab_size=49408, context_length=77)
-        hyco = HyCoCLIP(
+
+        # Instantiate the HyCoCLIP model
+        hyco_model = HyCoCLIP(
             visual=visual,
             textual=textual,
             embed_dim=512,
             curv_init=1.0,
             learn_curv=True,
             entail_weight=0.0,
-            use_boxes=True,
-            pixel_mean=(0.485, 0.456, 0.406),
-            pixel_std=(0.229, 0.224, 0.225),
+            use_boxes=True, # Required by HyCoCLIP
         )
-        # Load weights
+
+        # Load the pretrained weights
+        base_dir = Path(__file__).resolve().parent.parent
         base_models_dir = Path(__file__).resolve().parent.parent
         ckpt_path = base_models_dir / "hycoclip_vit_s.pth"
         ckpt = torch.load(ckpt_path, map_location="cpu", weights_only=False)
+
         state = ckpt.get("model", ckpt)
-        hyco.load_state_dict(state, strict=True)
+        hyco_model.load_state_dict(state, strict=True)
 
-        # Swap in the robust text encoder method
-        import types
-        hyco.encode_text = types.MethodType(final_robust_encode_text, hyco)
-
-        # Initialize the PytorchModel wrapper
-        super().__init__(hyco, model_name, hyco.embed_dim, hyco.pixel_mean, hyco.pixel_std)
+        # Initialize the parent PytorchModel class
+        super().__init__(hyco_model, model_name, *args)
         self.tokenizer = Tokenizer()
 
-        # Prepare or load cached zero-shot weights
-        project_root = Path(__file__).resolve().parents[4]
-        cache_file = project_root / "hycoclip_zeroshot_weights.pt"
-        if cache_file.exists():
-            zs = torch.load(cache_file)
-        else:
-            zs = self._get_zeroshot_weights(imagenet_classes, imagenet_templates)
-            torch.save(zs.cpu(), cache_file)
-        self.zeroshot_weights = zs.to(device())
-        hyco.to(device())
+        # Precompute the zero-shot classifier weights
+        self.zeroshot_weights = self._get_zeroshot_weights(imagenet_classes, imagenet_templates).to(device())
+
 
     def _get_zeroshot_weights(self, class_names: Sequence[str], templates: Sequence[str]) -> torch.Tensor:
         hyco = self.model
@@ -330,33 +323,70 @@ class HyCoCLIPModel(PytorchModel):
             for cls in tqdm(class_names, desc="HyCoCLIP zeroshot"):
                 prompts = [t.format(cls) for t in templates]
                 toks = self.tokenizer(prompts)
-                # Euclidean pooling
-                eu_feats = hyco.encode_text(toks, project=False)
-                mean_eu = eu_feats.mean(dim=0, keepdim=True)
-                # Hyperbolic map
-                hyper_feat = mean_eu * hyco.textual_alpha.exp()
+                
+                # 1. Encode all text templates directly into hyperbolic space
+                all_hyp_feats = hyco.encode_text(toks, project=True)
+                
+                # 2. Correctly average the features in hyperbolic space
                 with torch.autocast(dev.type, dtype=torch.float32):
-                    hyp_feat = L.exp_map0(hyper_feat.float(), hyco.curv.exp()).squeeze(0)
-                ws.append(hyp_feat)
+                    curv = hyco.curv.exp()
+                    
+                    # a. Map features to the tangent space at the origin
+                    tangent_space_feats = L.log_map0(all_hyp_feats.float(), curv)
+                    
+                    # b. Compute the standard average in this Euclidean-like tangent space
+                    mean_tangent_feat = tangent_space_feats.mean(dim=0, keepdim=True)
+                    
+                    # c. Map the average back to the hyperbolic manifold
+                    class_embedding = L.exp_map0(mean_tangent_feat, curv).squeeze(0)
+
+                ws.append(class_embedding)
             zeroshot_weights = torch.stack(ws, dim=1).to(dev)
         return zeroshot_weights
 
     def forward_batch(self, images: torch.Tensor) -> np.ndarray:
-        hyco = self.model
-        hyco.eval()
+        """
+        Encodes a batch of images and computes logits against the zero-shot classifier
+        by mirroring the logic in the model's original training objective.
+        """
+        self.model.eval()
+        
+        # Note: This preprocessing pattern remains fragile. A more robust solution
+        # would be to integrate the model's normalization directly into the
+        # data loader's transformation pipeline.
+        images = undo_default_preprocessing(images)
+        images = images.to(device())
+
         with torch.no_grad():
-            # Undo default loader preprocessing
-            images_unnorm = undo_default_preprocessing(images)
-            # Encode into hyperbolic space
-            img_feats = hyco.encode_image(images_unnorm, project=True)
-            # Compute logits via hyperbolic distance
-            curv = hyco.curv.exp()
-            logits = -L.pairwise_dist(img_feats, self.zeroshot_weights.T, curv)
-            logits = hyco.logit_scale.exp() * logits
-            return logits.detach().cpu().numpy()
+            # Encode images and project them onto the hyperbolic manifold
+            image_feats = self.model.encode_image(images, project=True)
+
+            # Get model curvature and the learned logit scale
+            curv = self.model.curv.exp()
+            scale = self.model.logit_scale.exp()
+
+            # 1. Compute scores using hyperbolic distance, the same metric used in training.
+            # A smaller distance means higher similarity, so we negate the distance.
+            logits = -L.pairwise_dist(image_feats, self.zeroshot_weights.T, curv)
+
+            # 2. Apply the learned temperature scaling
+            scaled_logits = scale * logits
+
+        return self.to_numpy(scaled_logits)
         
     def preprocess(self):
-        pass
+        """
+        Creates a preprocessing pipeline that aligns with CLIP's methodology.
+        It resizes, crops, and converts the image to a tensor in the [0, 1] range.
+        Normalization is NOT applied here, as it is handled internally by the
+        model's encode_image method.
+        """
+        n_px = self.model.visual.input_resolution
+        return Compose([
+            Resize(n_px, interpolation=Image.BICUBIC),
+            CenterCrop(n_px),
+            ToTensor(),
+        ])
 
 
 
