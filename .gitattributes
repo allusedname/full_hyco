@@ -1,0 +1,6 @@
+sample/PartImageNet/annotations/train_whole/train.json filter=lfs diff=lfs merge=lfs -text
+sample/PartImageNet/annotations/train/train.json filter=lfs diff=lfs merge=lfs -text
+sample/PartImageNet/annotations/val/val.json filter=lfs diff=lfs merge=lfs -text
+sample/PartImageNet/annotations/val_whole/val.json filter=lfs diff=lfs merge=lfs -text
+sample/PartImageNet/annotations/test/test.json filter=lfs diff=lfs merge=lfs -text
+sample/PartImageNet/annotations/test_whole/test.json filter=lfs diff=lfs merge=lfs -text
