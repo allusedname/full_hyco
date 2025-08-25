@@ -1,0 +1,4 @@
+[ZoneTransfer]
+ZoneId=3
+ReferrerUrl=https://github.com/naoto0804/pytorch-AdaIN/releases/tag/v0.0.0
+HostUrl=https://objects.githubusercontent.com/github-production-release-asset-2e65be/112338125/bf17fc1d-6b88-404c-9ec1-ecb143bd2d1f?X-Amz-Algorithm=AWS4-HMAC-SHA256&X-Amz-Credential=releaseassetproduction%2F20250703%2Fus-east-1%2Fs3%2Faws4_request&X-Amz-Date=20250703T060618Z&X-Amz-Expires=1800&X-Amz-Signature=f8bfe73e39d394c1ba7160ed79744f6adc0b08d100fd4b59fa2fec28fb1ef106&X-Amz-SignedHeaders=host&response-content-disposition=attachment%3B%20filename%3Ddecoder.pth&response-content-type=application%2Foctet-stream
