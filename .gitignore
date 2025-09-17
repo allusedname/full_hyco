@@ -1,9 +1,10 @@
 # Ignore specific folders
 hycoclip/datasets/coco/
 PartImageNet_Seg/
+PartImageNet/
 Compositor/
 Dist/
 
 # Ignore specific text files
 pat_key.txt
-
+PartImageNet_Seg.zip
