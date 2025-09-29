@@ -1,0 +1,73 @@
+{
+  "parts": [
+    "body",
+    "engine",
+    "fin",
+    "foot",
+    "hand",
+    "head",
+    "mirror",
+    "mouth",
+    "sail",
+    "seat",
+    "tail",
+    "tier",
+    "wing"
+  ],
+  "emb_dim": 128,
+  "arch": "per_part::squeezenet",
+  "detectors": [
+    {
+      "part": "body",
+      "file": "det_body.pt"
+    },
+    {
+      "part": "engine",
+      "file": "det_engine.pt"
+    },
+    {
+      "part": "fin",
+      "file": "det_fin.pt"
+    },
+    {
+      "part": "foot",
+      "file": "det_foot.pt"
+    },
+    {
+      "part": "hand",
+      "file": "det_hand.pt"
+    },
+    {
+      "part": "head",
+      "file": "det_head.pt"
+    },
+    {
+      "part": "mirror",
+      "file": "det_mirror.pt"
+    },
+    {
+      "part": "mouth",
+      "file": "det_mouth.pt"
+    },
+    {
+      "part": "sail",
+      "file": "det_sail.pt"
+    },
+    {
+      "part": "seat",
+      "file": "det_seat.pt"
+    },
+    {
+      "part": "tail",
+      "file": "det_tail.pt"
+    },
+    {
+      "part": "tier",
+      "file": "det_tier.pt"
+    },
+    {
+      "part": "wing",
+      "file": "det_wing.pt"
+    }
+  ]
+}
